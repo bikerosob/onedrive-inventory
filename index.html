@@ -40,7 +40,7 @@
     <h1>OneDrive Inventory</h1>
     <p class="lead">Varredura paginada de fotos, vídeos e documentos, com detecção de candidatos a duplicatas. Funciona no Safari do iPad. Apenas leitura. Nenhum arquivo é alterado ou enviado ao GitHub.</p>
     <span class="pill">Somente leitura · Files.Read</span>
-    <span class="pill warning">V1.1 · OAuth PKCE nativo</span>
+    <span class="pill warning">V1.2 · OAuth PKCE + inventário global</span>
   </header>
   <section class="panel">
     <h2>1. Autenticação Microsoft</h2>
@@ -78,8 +78,29 @@
       <div class="metric"><b id="groupCount">0</b><span>Grupos candidatos</span></div>
     </div>
   </section>
+  <section class="panel" id="wholeDrivePanel">
+    <h2>3. Inventariar OneDrive inteiro</h2>
+    <p>Varredura a partir da raiz, incluindo subpastas próprias. Atalhos compartilhados/remotos ficam fora do escopo. Somente metadados: nomes, caminhos, tamanhos, datas e hashes informados pelo Microsoft Graph.</p>
+    <p class="footnote">Checkpoint automático após cada página no armazenamento local deste Safari (IndexedDB). Não guarda tokens e não publica dados no GitHub. Mantenha esta aba aberta durante a leitura; se houver interrupção ou expiração do login, é possível retomar. Os dados salvos no Safari incluem nomes de arquivos privados — não use em dispositivo compartilhado.</p>
+    <div class="actions">
+      <button id="startGlobal" class="primary" disabled>Iniciar inventário geral</button>
+      <button id="resumeGlobal" disabled>Continuar varredura</button>
+      <button id="pauseGlobal" disabled>Pausar</button>
+      <button id="downloadGlobal" disabled>Baixar inventário geral CSV</button>
+      <button id="downloadGlobalDups" disabled>Baixar candidatos globais CSV</button>
+      <button id="clearGlobal" class="danger" disabled>Apagar checkpoint local</button>
+    </div>
+    <div id="globalStatus" role="status" class="status">Verificando inventário local…</div>
+    <div class="metrics">
+      <div class="metric"><b id="globalFiles">0</b><span>Arquivos</span></div>
+      <div class="metric"><b id="globalFolders">0</b><span>Pastas concluídas</span></div>
+      <div class="metric"><b id="globalPages">0</b><span>Páginas salvas</span></div>
+      <div class="metric"><b id="globalPending">0</b><span>Pastas pendentes</span></div>
+    </div>
+    <p id="globalPrivacy" class="footnote">Nenhuma modificação no OneDrive. Apenas GET para arquivos próprios; autenticação separada via Microsoft OAuth PKCE.</p>
+  </section>
   <section class="panel">
-    <h2>3. Resultado local</h2>
+    <h2>4. Resultado local de uma pasta</h2>
     <p id="scopeStatus" class="muted">Aguardando inventário.</p>
     <div class="actions">
       <button id="exportFiles" disabled>Baixar inventário CSV</button>
@@ -109,14 +130,15 @@
   const fmt = n=>compact.format(Number(n)||0);
   const bytes = n=>{let x=Number(n)||0;return x>=1e9?(x/1e9).toFixed(2)+' GB':x>=1e6?(x/1e6).toFixed(1)+' MB':x>=1e3?(x/1e3).toFixed(1)+' KB':String(x)+' B';};
   function msg(id,message,cls=''){const e=el(id);e.textContent=message;e.className='status'+(cls?' '+cls:'');}
-  function ready(){return !!(state.token&&state.drive&&Date.now()<state.tokenExpiresAt&&!state.busy);}
-  function buttons(){const can=ready();el('pilot').disabled=!can;el('full').disabled=!can||!state.pilotPassed;el('connect').disabled=state.busy;el('disconnect').disabled=!state.token||state.busy;el('demo').disabled=state.busy;el('cancel').disabled=!state.busy;el('exportFiles').disabled=state.busy||!state.files.length;el('exportDups').disabled=state.busy||!state.groups.length;el('clearResults').disabled=state.busy||!state.files.length;}
+  const globalState={running:false,pause:false,abort:null,db:null,meta:null,dupCache:null};
+  function ready(){return !!(state.token&&state.drive&&Date.now()<state.tokenExpiresAt&&!state.busy&&!globalState.running);}
+  function buttons(){const can=ready(),busy=state.busy||globalState.running;el('pilot').disabled=!can;el('full').disabled=!can||!state.pilotPassed;el('connect').disabled=busy;el('disconnect').disabled=!state.token||busy;el('demo').disabled=busy;el('cancel').disabled=!state.busy;el('exportFiles').disabled=busy||!state.files.length;el('exportDups').disabled=busy||!state.groups.length;el('clearResults').disabled=busy||!state.files.length;globalButtons();}
   function progress(){el('fileCount').textContent=fmt(state.files.length);el('folderCount').textContent=fmt(state.folders);el('pageCount').textContent=fmt(state.pages);el('groupCount').textContent=fmt(state.groups.length);el('progressBar').style.width=state.busy?Math.min(96,6+state.pages*2)+'%':state.complete?'100%':'0%';}
   function cleanError(err){return String(err?.errorMessage||err?.message||err||'Erro desconhecido').replace(/(access_token|refresh_token|id_token|code|code_verifier)=([^&\s]+)/ig,'$1=[oculto]').slice(0,250);}
   function randomUrlSafe(n){let a=new Uint8Array(n);crypto.getRandomValues(a);return btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
   async function challengeFor(verifier){let a=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)));return btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
   async function connect(){
-    if(state.busy)return;
+    if(state.busy||globalState.running)return;
     try{
       if(state.token&&Date.now()<state.tokenExpiresAt){if(!state.drive)await verifyDrive();return;}
       if(!window.isSecureContext||!crypto?.subtle)throw Error('É necessário HTTPS e Web Crypto no Safari.');
@@ -127,7 +149,7 @@
     }catch(e){msg('authStatus','Autenticação não iniciada: '+cleanError(e),'err');}
     buttons();
   }
-  function disconnect(){if(state.busy)return;state.token=null;state.tokenExpiresAt=0;state.drive=null;state.pilotPassed=false;sessionStorage.removeItem(AUTH_KEY);clearResults();msg('authStatus','Sessão local encerrada. O logout global da Microsoft não foi solicitado.');buttons();}
+  function disconnect(){if(state.busy||globalState.running)return;state.token=null;state.tokenExpiresAt=0;state.drive=null;state.pilotPassed=false;sessionStorage.removeItem(AUTH_KEY);clearResults();msg('authStatus','Sessão local encerrada. O logout global da Microsoft não foi solicitado.');buttons();}
   async function restoreOAuthCallback(){
     const query=new URLSearchParams(location.search);
     if(!query.has('code')&&!query.has('error'))return false;
@@ -172,7 +194,7 @@
   function resetData(){state.files=[];state.groups=[];state.pages=0;state.folders=0;state.ignored=0;state.complete=false;state.demo=false;state.error=null;progress();buttons();el('duplicateRows').replaceChildren();el('scopeStatus').textContent='Aguardando inventário.';}
   function clearResults(){resetData();msg('scanStatus','Resultado removido da memória desta página.');}
   async function scan(mode){
-    if(state.busy)return;
+    if(state.busy||globalState.running)return;
     const limited=mode==='pilot';if(!limited&&!state.pilotPassed){msg('scanStatus','Execute primeiro o piloto de duas páginas.','err');return;}
     state.cancel=false;state.controller=new AbortController();state.busy=true;resetData();buttons();
     const limit=limited?2:Infinity;
@@ -205,14 +227,222 @@
     }catch(e){state.complete=false;state.error=cleanError(e);msg('scanStatus',state.cancel?'Leitura cancelada.':'Varredura interrompida: '+state.error,'err');}
     finally{state.busy=false;state.controller=null;showResult();}
   }
-  function demo(){if(state.busy)return;resetData();state.demo=true;const rows=[['foto-01.jpg',11400,'SHA-256','ABC123'],['foto-01-copia.jpg',11400,'SHA-256','ABC123'],['clip-01.mp4',800010,'SHA-1','DEF987'],['clip-01-2.mp4',800010,'SHA-1','DEF987'],['raw.nef',1000000,'SHA-256','RAW1'],['preview.jpg',350000,'SHA-256','JPG1'],['outro.jpg',23000,'QuickXor','XYZ'],['outro-2.jpg',23000,'QuickXor','XYZ']];for(const [name,sizeBytes,hashAlgorithm,hashValue] of rows)state.files.push({driveId:'DEMONSTRACAO',itemId:'SIM-'+name,parentId:'SIM-PASTA',folderPath:'EXEMPLO-FICTICIO',name,extension:name.split('.').pop(),sizeBytes,lastModified:'',hashAlgorithm,hashValue,candidateGroup:''});state.pages=2;state.folders=1;showResult();msg('scanStatus','MODO DEMONSTRAÇÃO — dados fictícios. Nenhuma conexão ao OneDrive.','ok');}
+  function demo(){if(state.busy||globalState.running)return;resetData();state.demo=true;const rows=[['foto-01.jpg',11400,'SHA-256','ABC123'],['foto-01-copia.jpg',11400,'SHA-256','ABC123'],['clip-01.mp4',800010,'SHA-1','DEF987'],['clip-01-2.mp4',800010,'SHA-1','DEF987'],['raw.nef',1000000,'SHA-256','RAW1'],['preview.jpg',350000,'SHA-256','JPG1'],['outro.jpg',23000,'QuickXor','XYZ'],['outro-2.jpg',23000,'QuickXor','XYZ']];for(const [name,sizeBytes,hashAlgorithm,hashValue] of rows)state.files.push({driveId:'DEMONSTRACAO',itemId:'SIM-'+name,parentId:'SIM-PASTA',folderPath:'EXEMPLO-FICTICIO',name,extension:name.split('.').pop(),sizeBytes,lastModified:'',hashAlgorithm,hashValue,candidateGroup:''});state.pages=2;state.folders=1;showResult();msg('scanStatus','MODO DEMONSTRAÇÃO — dados fictícios. Nenhuma conexão ao OneDrive.','ok');}
   function csvCell(v){let s=String(v==null?'':v);if(/^[\s]*[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';}
   function csv(rows){return '\uFEFF'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n')+'\r\n';}
   function downloadCsv(name,rows){const blob=new Blob([csv(rows)],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);}
   function exportFiles(){if(state.busy||!state.files.length)return;const rows=[['drive_id','item_id','parent_id','folder_path','name','extension','size_bytes','last_modified','hash_algorithm','hash_value','candidate_group','is_partial','demo']];for(const f of state.files)rows.push([f.driveId,f.itemId,f.parentId,f.folderPath,f.name,f.extension,f.sizeBytes,f.lastModified,f.hashAlgorithm,f.hashValue,f.candidateGroup,state.complete?'no':'yes',state.demo?'yes':'no']);downloadCsv('onedrive-inventario-'+new Date().toISOString().slice(0,10)+'.csv',rows);}
   function exportGroups(){if(state.busy||!state.groups.length)return;const rows=[['group','algorithm','size_bytes','copy_count','candidate_saved_bytes','file_path','item_id','notice','is_partial','demo']];for(const g of state.groups)for(const f of g.files)rows.push([g.group,g.algorithm,g.sizeBytes,g.files.length,g.sizeBytes*(g.files.length-1),f.folderPath+'/'+f.name,f.itemId,g.certainty,state.complete?'no':'yes',state.demo?'yes':'no']);downloadCsv('onedrive-duplicatas-candidatas-'+new Date().toISOString().slice(0,10)+'.csv',rows);}
+  // V1.2: isolated, resumable, read-only whole-drive inventory. All persistent data is metadata, never OAuth tokens.
+  const GLOBAL_DB='fabioOS.oneDriveInventory.wholeDrive.v1';
+  const GLOBAL_META='whole';
+  const GLOBAL_PAGE_SIZE=200;
+  const GLOBAL_SELECT='$select=id,name,size,file,folder,remoteItem,parentReference,lastModifiedDateTime';
+  const MAX_GLOBAL_PAGES=200000;
+  const globalKey=f=>f.hashAlgorithm&&f.hashValue?[f.hashAlgorithm,String(f.sizeBytes),f.hashValue].join('|'):'';
+  const idbResult=req=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||Error('Falha no banco de dados local.'));});
+  function idbComplete(tx){return new Promise((resolve,reject)=>{tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error||Error('Transação do inventário abortada.'));tx.onerror=()=>{};});}
+  async function globalDb(){
+    if(globalState.db)return globalState.db;
+    if(!window.indexedDB)throw Error('Armazenamento IndexedDB não disponível neste Safari. Desative o modo privado e permita armazenamento local.');
+    const req=indexedDB.open(GLOBAL_DB,1);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      db.createObjectStore('meta',{keyPath:'key'});
+      db.createObjectStore('files',{keyPath:'itemId'});
+      db.createObjectStore('folders',{keyPath:'id'});
+      db.createObjectStore('pages',{keyPath:'url'});
+    };
+    const db=await idbResult(req);
+    db.onversionchange=()=>{db.close();globalState.db=null;};
+    globalState.db=db;return db;
+  }
+  async function globalGet(store,key){const db=await globalDb();return await idbResult(db.transaction(store,'readonly').objectStore(store).get(key));}
+  async function globalKeys(store){const db=await globalDb();return await idbResult(db.transaction(store,'readonly').objectStore(store).getAllKeys());}
+  async function globalSaveMeta(meta){const db=await globalDb(),tx=db.transaction('meta','readwrite'),done=idbComplete(tx);tx.objectStore('meta').put(meta);await done;}
+  function globalButtons(){
+    const m=globalState.meta,connected=!!(state.token&&state.drive&&Date.now()<state.tokenExpiresAt),running=globalState.running,otherBusy=state.busy;
+    const sameDrive=!m||!state.drive||m.driveId===state.drive.id;
+    el('startGlobal').disabled=running||otherBusy||!connected||!!m;
+    el('resumeGlobal').disabled=running||otherBusy||!connected||!m||m.complete||!sameDrive;
+    el('pauseGlobal').disabled=!running;
+    el('downloadGlobal').disabled=running||!m||!m.files;
+    el('downloadGlobalDups').disabled=running||!m||!m.files;
+    el('clearGlobal').disabled=running||otherBusy||!m;
+  }
+  function globalDisplay(custom='',css=''){
+    const m=globalState.meta;
+    el('globalFiles').textContent=fmt(m?.files||0);
+    el('globalFolders').textContent=fmt(m?.folders||0);
+    el('globalPages').textContent=fmt(m?.pages||0);
+    el('globalPending').textContent=fmt(m?.queue?.length||0);
+    const status=custom||(m?(m.complete?`Inventário global CONCLUÍDO: ${fmt(m.files)} arquivos, ${fmt(m.folders)} pastas e ${fmt(m.pages)} páginas. ${fmt(m.ignored)} atalhos/itens ignorados.`:`Checkpoint local: ${fmt(m.files)} arquivos em ${fmt(m.pages)} páginas. ${fmt(m.queue.length)} pastas pendentes. Use Continuar varredura após conectar.`):'Nenhum inventário global salvo. Conecte à Microsoft e inicie quando desejar.');
+    msg('globalStatus',status,css||(m?.complete?'ok':''));globalButtons();
+  }
+  async function globalLoad(){
+    try{globalState.meta=await globalGet('meta',GLOBAL_META);globalDisplay();}
+    catch(e){globalDisplay('Falha no armazenamento local: '+cleanError(e),'err');}
+  }
+  function globalFileRecord(item,path,parentId){
+    const hashes=item.file?.hashes||{},algorithm=hashes.sha256Hash?'SHA-256':hashes.sha1Hash?'SHA-1':hashes.quickXorHash?'QuickXor':'';
+    const hash=hashes.sha256Hash||hashes.sha1Hash||hashes.quickXorHash||'';
+    const name=typeof item.name==='string'?item.name:'';
+    return {driveId:state.drive.id,itemId:item.id,parentId,folderPath:path||'(raiz)',name,extension:name.includes('.')?name.split('.').pop().toLowerCase():'',sizeBytes:Number(item.size)||0,lastModified:item.lastModifiedDateTime||'',hashAlgorithm:algorithm,hashValue:hash,candidateGroup:''};
+  }
+  async function globalStart(){
+    if(globalState.running||state.busy||globalState.meta||!state.drive)return;
+    if(!confirm('Inventariar TODO o OneDrive pessoal (metadados, inclusive nomes privados)? A operação é somente leitura e salvará checkpoints neste Safari. Nenhum arquivo será enviado ao GitHub.'))return;
+    try{
+      const db=await globalDb();const token=await getToken();
+      // Root is an owned Graph driveItem, not a user-entered path or a shortcut.
+      const root=await fetchGraph(API+'/me/drive/root',token,new AbortController().signal);
+      if(!root.id||!root.folder||root.remoteItem||root.parentReference?.driveId&&root.parentReference.driveId!==state.drive.id)throw Error('Não foi possível validar a raiz do OneDrive pessoal.');
+      const now=new Date().toISOString();
+      const meta={key:GLOBAL_META,version:1,driveId:state.drive.id,queue:[{id:root.id,path:'',next:null}],pages:0,files:0,folders:0,ignored:0,bytes:0,complete:false,startedAt:now,updatedAt:now};
+      const tx=db.transaction(['meta','folders'],'readwrite'),done=idbComplete(tx);
+      tx.objectStore('meta').add(meta);tx.objectStore('folders').add({id:root.id});await done;
+      globalState.meta=meta;globalState.dupCache=null;
+      await globalResume();
+    }catch(e){globalDisplay('Não foi possível iniciar: '+cleanError(e),'err');await globalLoad();}
+  }
+  function globalPause(){
+    if(!globalState.running)return;
+    globalState.pause=true;globalState.abort?.abort();
+    globalDisplay('Pausando. As páginas já confirmadas permanecem salvas no iPad.');
+  }
+  async function globalResume(){
+    if(globalState.running||state.busy)return;
+    let db,meta;
+    try{
+      db=await globalDb();meta=await globalGet('meta',GLOBAL_META);
+      if(!meta)throw Error('Nenhum checkpoint geral encontrado.');
+      if(meta.complete){globalState.meta=meta;globalDisplay();return;}
+      if(!state.drive||meta.driveId!==state.drive.id)throw Error('Este checkpoint pertence a outro drive; conecte à conta original.');
+      state.cancel=false; // Cancelamento de uma leitura anterior por pasta não afeta a varredura geral.
+      await getToken();
+      globalState.running=true;globalState.pause=false;globalState.abort=new AbortController();
+      globalState.meta=meta;globalState.dupCache=null;buttons();globalDisplay('Carregando checkpoint e retomando varredura…');
+      // File and folder keys are used to protect counts from duplicate Graph pages on resume.
+      const knownFiles=new Set(await globalKeys('files'));
+      const knownFolders=new Set(await globalKeys('folders'));
+      const signal=globalState.abort.signal;
+      while(meta.queue.length&&!globalState.pause){
+        if(Date.now()>=state.tokenExpiresAt){throw Error('Sessão Microsoft expirada. Conecte novamente e use Continuar varredura.');}
+        if(meta.pages>=MAX_GLOBAL_PAGES)throw Error('Limite de segurança de páginas atingido.');
+        const task=meta.queue[0];
+        const base=API+'/me/drive/items/'+encodeURIComponent(task.id)+'/children?$top='+GLOBAL_PAGE_SIZE+'&'+GLOBAL_SELECT;
+        const url=safeApiUrl(task.next||base);
+        if(await globalGet('pages',url))throw Error('Ciclo na paginação Graph detectado. O checkpoint foi preservado.');
+        const data=await fetchGraph(url,await getToken(),signal);
+        if(!Array.isArray(data.value))throw Error('Lista Graph inválida; não foi confirmado avanço desta página.');
+        const newFiles=[],newFolders=[];const pendingFileIds=new Set(),pendingFolderIds=new Set();let ignored=0,bytesRead=0;
+        const driveId=meta.driveId.toLowerCase();
+        for(const child of data.value){
+          const parent=child.parentReference||{};
+          const sameDrive=String(parent.driveId||meta.driveId).toLowerCase()===driveId;
+          if(!sameDrive||child.remoteItem||(parent.id&&parent.id!==task.id)){ignored++;continue;}
+          if(child.folder&&child.id&&typeof child.name==='string'){
+            if(!knownFolders.has(child.id)&&!pendingFolderIds.has(child.id)){
+              const path=task.path?task.path+'/'+child.name:child.name;
+              newFolders.push({id:child.id,path});pendingFolderIds.add(child.id);
+            }
+          }else if(child.file&&child.id){
+            if(!knownFiles.has(child.id)&&!pendingFileIds.has(child.id)){
+              newFiles.push(globalFileRecord(child,task.path,task.id));pendingFileIds.add(child.id);bytesRead+=Number(child.size)||0;
+            }
+          }else ignored++;
+        }
+        const link=data['@odata.nextLink'];if(link&&typeof link!=='string')throw Error('nextLink Graph inválido.');
+        const next=link?safeApiUrl(link):null;
+        const queue=meta.queue.slice();
+        if(next)queue[0]={...task,next};else queue.shift();
+        for(const folder of newFolders)queue.push({id:folder.id,path:folder.path,next:null});
+        const newMeta={...meta,queue,pages:meta.pages+1,files:meta.files+newFiles.length,folders:meta.folders+(next?0:1),ignored:meta.ignored+ignored,bytes:meta.bytes+bytesRead,complete:queue.length===0,updatedAt:new Date().toISOString()};
+        // A page, its files, newly discovered folders and continuation cursor are committed ATOMICALLY.
+        const tx=db.transaction(['files','folders','pages','meta'],'readwrite'),done=idbComplete(tx);
+        for(const file of newFiles)tx.objectStore('files').add(file);
+        for(const folder of newFolders)tx.objectStore('folders').add({id:folder.id});
+        tx.objectStore('pages').add({url});
+        tx.objectStore('meta').put(newMeta);
+        await done;
+        for(const file of newFiles)knownFiles.add(file.itemId);
+        for(const folder of newFolders)knownFolders.add(folder.id);
+        meta=newMeta;globalState.meta=meta;
+        globalDisplay(`Lendo ${task.path||'(raiz)'}\n${fmt(meta.files)} arquivos · ${bytes(meta.bytes)} · ${fmt(meta.pages)} páginas · ${fmt(meta.queue.length)} pastas pendentes`);
+      }
+      globalDisplay(meta.complete?`Inventário geral CONCLUÍDO: ${fmt(meta.files)} arquivos, ${fmt(meta.folders)} pastas, ${fmt(meta.pages)} páginas. Nenhum arquivo alterado.`:'Varredura pausada. Checkpoint preservado; retome quando desejar.',meta.complete?'ok':'');
+    }catch(e){
+      globalDisplay(globalState.pause?'Varredura pausada. Checkpoint preservado.':'Leitura interrompida: '+cleanError(e)+'\nCheckpoint preservado. Conecte novamente, se necessário, e use Continuar varredura.',globalState.pause?'':'err');
+    }finally{
+      globalState.running=false;globalState.pause=false;globalState.abort=null;buttons();
+    }
+  }
+  async function globalClear(){
+    if(globalState.running||state.busy||!globalState.meta)return;
+    if(!confirm('Apagar SOMENTE o inventário/checkpoint armazenado neste Safari? Isto NÃO altera o OneDrive. Esta ação apagará também a capacidade de retomar e os resultados locais desta varredura.'))return;
+    try{
+      const db=await globalDb(),tx=db.transaction(['meta','files','folders','pages'],'readwrite'),done=idbComplete(tx);
+      for(const store of ['meta','files','folders','pages'])tx.objectStore(store).clear();
+      await done;globalState.meta=null;globalState.dupCache=null;globalDisplay('Checkpoint e resultados gerais apagados SOMENTE deste Safari. OneDrive intacto.');
+    }catch(e){globalDisplay('Erro ao apagar dados locais: '+cleanError(e),'err');}
+  }
+  // Cursor iteration avoids getAll() on large libraries; no personal metadata leaves the browser automatically.
+  async function globalEachFile(consume){
+    const db=await globalDb(),tx=db.transaction('files','readonly');
+    await new Promise((resolve,reject)=>{
+      const req=tx.objectStore('files').openCursor();
+      req.onerror=()=>reject(req.error||Error('Erro lendo CSV local.'));
+      req.onsuccess=()=>{const cur=req.result;if(!cur){resolve();return;}try{consume(cur.value);}catch(e){reject(e);return;}cur.continue();};
+      tx.onabort=()=>reject(tx.error||Error('Inventário local indisponível.'));
+    });
+  }
+  async function globalGroups(){
+    if(globalState.dupCache)return globalState.dupCache;
+    const counts=new Map();
+    await globalEachFile(f=>{const k=globalKey(f);if(!k)return;const g=counts.get(k);if(g)g.count++;else counts.set(k,{count:1,algorithm:f.hashAlgorithm,size:f.sizeBytes});});
+    const result=new Map();let n=0;
+    for(const [key,g] of counts){if(g.count>1){n++;result.set(key,{...g,group:'DUP-'+String(n).padStart(6,'0')});}}
+    globalState.dupCache=result;return result;
+  }
+  function globalCsvFilename(kind,meta){return 'onedrive-GERAL-'+kind+'-'+String(meta.startedAt).slice(0,10)+'.csv';}
+  async function globalExport(kind){
+    if(globalState.running)return;
+    const meta=globalState.meta;if(!meta?.files)return;
+    const btn=el(kind==='files'?'downloadGlobal':'downloadGlobalDups');
+    btn.disabled=true;const prev=btn.textContent;btn.textContent='Preparando CSV…';
+    try{
+      const groups=await globalGroups();
+      const rows=[];let n=0;
+      const header=kind==='files'?['drive_id','item_id','parent_id','folder_path','name','extension','size_bytes','last_modified','hash_algorithm','hash_value','candidate_group','is_partial','demo']:['group','algorithm','size_bytes','copy_count','candidate_saved_bytes','file_path','item_id','notice','is_partial','demo'];
+      const chunks=['\uFEFF'+header.map(csvCell).join(',')+'\r\n'];
+      await globalEachFile(f=>{
+        const g=groups.get(globalKey(f));
+        if(kind==='groups'&&!g)return;
+        const row=kind==='files'?[f.driveId,f.itemId,f.parentId,f.folderPath,f.name,f.extension,f.sizeBytes,f.lastModified,f.hashAlgorithm,f.hashValue,g?.group||'',meta.complete?'no':'yes','no']:[g.group,g.algorithm,g.size,g.count,g.size*(g.count-1),f.folderPath+'/'+f.name,f.itemId,g.algorithm==='QuickXor'?'Verificação criptográfica obrigatória':'Verificar origem, backups e dependências',meta.complete?'no':'yes','no'];
+        rows.push(row.map(csvCell).join(','));
+        if(++n%3000===0){chunks.push(rows.join('\r\n')+'\r\n');rows.length=0;}
+      });
+      if(rows.length)chunks.push(rows.join('\r\n')+'\r\n');
+      // Avoid long-lived, single-string CSV allocations on mobile Safari.
+      const blob=new Blob(chunks,{type:'text/csv;charset=utf-8'});
+      const url=URL.createObjectURL(blob),a=document.createElement('a');
+      a.href=url;a.download=globalCsvFilename(kind,meta);document.body.appendChild(a);a.click();a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url),15000);
+      globalDisplay(`CSV ${kind==='files'?'inventário completo':'candidatos'} preparado: ${fmt(n)} linhas. Salve o arquivo privado; não envie ao GitHub.`,meta.complete?'ok':'');
+    }catch(e){globalDisplay('Erro ao exportar CSV: '+cleanError(e),'err');}
+    finally{btn.textContent=prev;globalButtons();}
+  }
+  function globalHandlers(){
+    el('startGlobal').addEventListener('click',globalStart);
+    el('resumeGlobal').addEventListener('click',globalResume);
+    el('pauseGlobal').addEventListener('click',globalPause);
+    el('clearGlobal').addEventListener('click',globalClear);
+    el('downloadGlobal').addEventListener('click',()=>globalExport('files'));
+    el('downloadGlobalDups').addEventListener('click',()=>globalExport('groups'));
+  }
+
   function handlers(){el('connect').addEventListener('click',connect);el('disconnect').addEventListener('click',disconnect);el('pilot').addEventListener('click',()=>scan('pilot'));el('full').addEventListener('click',()=>scan('full'));el('cancel').addEventListener('click',()=>{state.cancel=true;state.controller?.abort();msg('scanStatus','Cancelando a consulta atual…');});el('demo').addEventListener('click',demo);el('exportFiles').addEventListener('click',exportFiles);el('exportDups').addEventListener('click',exportGroups);el('clearResults').addEventListener('click',clearResults);}
-  async function boot(){handlers();progress();buttons();try{const returned=await restoreOAuthCallback();if(!returned)msg('authStatus','Aplicativo configurado. Toque em Conectar à Microsoft para autenticar.');}catch(e){state.token=null;state.tokenExpiresAt=0;state.drive=null;msg('authStatus','Autenticação não concluída: '+cleanError(e)+'\nToque em Conectar à Microsoft para tentar novamente.','err');}buttons();}
+  async function boot(){handlers();globalHandlers();progress();buttons();await globalLoad();try{const returned=await restoreOAuthCallback();if(!returned)msg('authStatus','Aplicativo configurado. Toque em Conectar à Microsoft para autenticar.');}catch(e){state.token=null;state.tokenExpiresAt=0;state.drive=null;msg('authStatus','Autenticação não concluída: '+cleanError(e)+'\nToque em Conectar à Microsoft para tentar novamente.','err');}buttons();globalButtons();}
   boot();
 })();
 </script>
