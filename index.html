@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>OneDrive Inventory — Fabio OS</title>
+  <style>
+    :root { --bg:#101720;--panel:#192330;--line:#334356;--muted:#a3b4c7;--text:#f4f8fd;--accent:#8cc8ff;--ok:#91e3bd;--warn:#f6cf8c;--bad:#ffaaa8;--pad:18px; color-scheme:dark }
+    * { box-sizing:border-box }
+    body { margin:0; background:var(--bg); color:var(--text);font:16px/1.46 system-ui,-apple-system,"Segoe UI",sans-serif }
+    main { max-width:980px;margin:0 auto;padding:20px 16px 75px }
+    header { padding:10px 0 18px }
+    .eyebrow { color:var(--accent);font-size:12px;font-weight:800;letter-spacing:.12em;text-transform:uppercase }
+    h1 {font-size:clamp(26px,4vw,36px);margin:6px 0 8px;letter-spacing:-.035em}
+    h2 {font-size:19px;margin:0 0 10px}
+    h3 {font-size:16px;margin:0 0 8px}
+    p {margin:9px 0}
+    .muted,small {color:var(--muted)}
+    .lead {max-width:740px;color:var(--muted)}
+    .panel {background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:var(--pad);margin:15px 0}
+    .grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+    .fields {display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    label {display:block;font-weight:650;font-size:14px;margin:10px 0 6px}
+    input[type=text],input[type=number],input[type=email] {width:100%;border:1px solid #50657b;border-radius:8px;background:#0e1721;color:var(--text);font:inherit;padding:11px 12px;min-height:44px}
+    input:focus,button:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
+    input[type=checkbox] {width:19px;height:19px;margin:0;accent-color:var(--accent)}
+    .checklabel {display:flex;align-items:center;gap:10px;font-weight:500;font-size:14px}
+    .mono {font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere;font-size:13px}
+    button {appearance:none;border:1px solid #6383a5;background:#21344a;color:var(--text);padding:10px 14px;border-radius:9px;min-height:44px;font-weight:700;font:inherit;cursor:pointer}
+    button.primary {background:#a8d7ff;color:#10283e;border-color:#a8d7ff;font-weight:750}
+    button.danger {border-color:#a87070;color:#ffd2d0}
+    button[disabled] {opacity:.4;cursor:not-allowed}
+    .actions {display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:13px}
+    .pill {display:inline-block;border:1px solid #3f745e;border-radius:999px;color:var(--ok);font-size:12px;font-weight:700;padding:3px 9px}
+    .warning {border-color:#725d38;color:var(--warn)}
+    .status {border-radius:9px;padding:10px 12px;margin:12px 0;background:#101b27;border:1px solid #40556c;white-space:pre-wrap;overflow-wrap:anywhere}
+    .status.ok {color:var(--ok);border-color:#426b5d}
+    .status.err {color:var(--bad);border-color:#9d5956}
+    .progress {height:11px;background:#10202e;border:1px solid var(--line);border-radius:9px;overflow:hidden;margin:12px 0}
+    .progress>div {height:100%;width:0;background:#8cc8ff;transition:width .2s}
+    .metrics {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:16px 0}
+    .metric {border:1px solid var(--line);border-radius:10px;padding:10px;background:#101b27;min-width:0}
+    .metric b {display:block;font-size:24px;letter-spacing:-.04em;overflow-wrap:anywhere}
+    .metric span {color:var(--muted);font-size:12px}
+    details {border:1px solid var(--line);border-radius:10px;margin:9px 0;padding:12px}
+    summary {cursor:pointer;font-weight:700}
+    ol {padding-left:21px;margin:12px 0}
+    li {padding:3px 0}
+    a {color:var(--accent)}
+    .tablewrap {overflow:auto;max-height:420px;border:1px solid var(--line);border-radius:9px}
+    table {width:100%;border-collapse:collapse;font-size:13px;min-width:680px}
+    th,td {padding:10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}
+    th {position:sticky;top:0;background:#273749}
+    .footnote {font-size:13px;color:var(--muted)}
+    .hidden {display:none!important}
+    @media(max-width:650px) { .grid,.fields {grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))} .panel{padding:13px} }
+  </style>
+  <!-- Biblioteca oficial Microsoft, com versão fixa e verificação de integridade. Sem dependências de terceiros. -->
+  <script defer src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js" integrity="sha384-PARf28kmic36Ve+O3DnUerRXFtOQ7ZDqRDGpLcbljly5/N39T2OV3kt3QsWOKeAX" crossorigin="anonymous"></script>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Fabio OS · inventário seguro</div>
+    <h1>OneDrive Inventory</h1>
+    <p class="lead">Varredura paginada de fotos, vídeos e documentos, com detecção de candidatos a duplicatas. Funciona no Safari do iPad. Apenas leitura. Nenhum arquivo é alterado ou enviado ao GitHub.</p>
+    <span class="pill">Somente leitura · Files.Read</span>
+    <span class="pill warning">V1 · requer registro Microsoft</span>
+  </header>
+
+  <section class="panel">
+    <h2>1. Autenticação Microsoft</h2>
+    <p class="muted">Este aplicativo não usa a sessão do Graph Explorer. É necessário um registro de aplicativo próprio com plataforma <strong>Single-page application (SPA)</strong>, tipo de conta <strong>Personal Microsoft accounts only</strong> e permissão delegada <strong>Files.Read</strong>.</p>
+    <label for="redirectUri">URL de retorno exata (copie para o cadastro Microsoft)</label>
+    <input type="text" id="redirectUri" readonly autocomplete="off">
+    <div class="actions"><button id="copyRedirect" type="button">Copiar URL de retorno</button> <a href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener noreferrer">Abrir Microsoft Entra</a></div>
+    <label for="clientId">Application (client) ID</label>
+    <input type="text" id="clientId" autocomplete="off" inputmode="text" placeholder="Cole o UUID do aplicativo cadastrado (não é senha)">
+    <small>O Client ID não é secreto. Só ele é salvo neste navegador; tokens ficam no armazenamento de sessão da biblioteca Microsoft.</small>
+    <div class="actions">
+      <button id="connect" class="primary" type="button">Conectar à Microsoft</button>
+      <button id="disconnect" type="button" disabled>Desconectar</button>
+    </div>
+    <div id="authStatus" role="status" class="status">Aguardando configuração. Você pode experimentar o modo demonstração sem login.</div>
+    <details>
+      <summary>Instruções de cadastro, caso ainda não tenha um Client ID</summary>
+      <ol>
+        <li>Abra Microsoft Entra → <strong>Identity → Applications → App registrations → New registration</strong>.</li>
+        <li>Nome sugerido: <strong>Fabio OS OneDrive Inventory</strong>. Escolha <strong>Personal Microsoft accounts only</strong> ou a opção que inclua contas Microsoft pessoais.</li>
+        <li>Em <strong>Authentication → Add a platform</strong>, selecione <strong>Single-page application</strong> e registre a URL exata exibida acima. Não escolha “Web”.</li>
+        <li>Em <strong>API permissions</strong>, configure <strong>Microsoft Graph → Delegated → Files.Read</strong>. Não conceda <strong>Files.ReadWrite</strong> nem permissões de aplicativo.</li>
+        <li>Copie apenas <strong>Application (client) ID</strong> no campo acima. <strong>Nunca</strong> crie nem cole um client secret, senha, código de recuperação ou access token nesta página.</li>
+        <li>Se o Entra negar o cadastro porque sua conta não tem um diretório com permissão para registrar aplicativos, pare: precisaremos de outro método autorizado. Não contrate serviços por causa deste teste.</li>
+      </ol>
+    </details>
+  </section>
+
+  <section class="panel">
+    <h2>2. Inventariar pasta</h2>
+    <div class="fields">
+      <div><label for="folderPath">Pasta dentro do OneDrive</label><input id="folderPath" type="text" value="Imagens/Imagens da Câmera" autocomplete="off"><small>O caminho é resolvido na sua própria conta; atalhos compartilhados não são percorridos.</small></div>
+      <div><label for="pageSize">Itens por página</label><input id="pageSize" type="number" value="200" min="5" max="200" step="1"><small>O Graph fornecerá as páginas seguintes automaticamente.</small></div>
+    </div>
+    <div style="margin-top:13px"><label class="checklabel" for="recurse"><input id="recurse" type="checkbox"> Incluir subpastas recursivamente (desativado no piloto)</label></div>
+    <div class="actions">
+      <button class="primary" id="pilot" disabled>Teste real: 2 páginas</button>
+      <button id="full" disabled>Inventário completo</button>
+      <button id="cancel" class="danger" disabled>Cancelar</button>
+      <button id="demo">Demonstração sem acesso</button>
+    </div>
+    <div id="scanStatus" role="status" class="status">Nenhuma leitura iniciada.</div>
+    <div class="progress"><div id="progressBar"></div></div>
+    <div class="metrics">
+      <div class="metric"><b id="fileCount">0</b><span>Arquivos</span></div>
+      <div class="metric"><b id="folderCount">0</b><span>Pastas lidas</span></div>
+      <div class="metric"><b id="pageCount">0</b><span>Páginas</span></div>
+      <div class="metric"><b id="groupCount">0</b><span>Grupos candidatos</span></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>3. Resultado local</h2>
+    <p id="scopeStatus" class="muted">Aguardando inventário.</p>
+    <div class="actions">
+      <button id="exportFiles" disabled>Baixar inventário CSV</button>
+      <button id="exportDups" disabled>Baixar candidatos CSV</button>
+      <button id="clearResults" disabled>Limpar resultado da memória</button>
+    </div>
+    <h3 style="margin-top:21px">Primeiros grupos candidatos</h3>
+    <p class="footnote">Grupo com tamanho e hash iguais não autoriza exclusão: SHA-256/SHA-1 são mais fortes; QuickXor é não criptográfico. RAW+JPEG, partes GoPro e arquivos vinculados por aplicativo precisam de revisão própria.</p>
+    <div class="tablewrap"><table><thead><tr><th>Algoritmo</th><th>Tamanho</th><th>Cópias</th><th>Arquivos (primeiros)</th></tr></thead><tbody id="duplicateRows"><tr><td colspan="4">Sem dados.</td></tr></tbody></table></div>
+  </section>
+  <p class="footnote">Segurança: nenhuma chamada de upload, movimentação, renomeação ou exclusão. As únicas requisições de dados são para login.microsoftonline.com e graph.microsoft.com. O site pode ser publicamente visível no GitHub Pages, mas os arquivos, tokens e resultados não são publicados; mantenha o navegador atualizado e não instale extensões desconhecidas.</p>
+</main>
+<script>
+(() => {
+  'use strict';
+  const API = 'https://graph.microsoft.com/v1.0';
+  const SCOPES = ['Files.Read'];
+  const CLIENT_KEY = 'fabioOS.onedriveInventory.clientId.v1';
+  const el = (id) => document.getElementById(id);
+  const state = { msal:null, account:null, drive:null, busy:false, cancel:false, controller:null, authClientId:null, files:[], groups:[], pages:0, folders:0, ignored:0, complete:false, demo:false, startedAt:null, error:null };
+  const redirectUri = location.origin + location.pathname;
+  el('redirectUri').value = redirectUri;
+  const saved = localStorage.getItem(CLIENT_KEY);
+  if (saved) el('clientId').value = saved;
+  const compact = new Intl.NumberFormat('pt-BR');
+  const fmt = (n) => compact.format(Number(n)||0);
+  const bytes = (n) => { const x=Number(n)||0;return x>=1e9?(x/1e9).toFixed(2)+' GB':x>=1e6?(x/1e6).toFixed(1)+' MB':x>=1e3?(x/1e3).toFixed(1)+' KB':String(x)+' B'; };
+  function msg(id, message, cls='') { let e=el(id);e.textContent=message;e.className='status'+(cls?' '+cls:''); }
+  function assertGuid(str) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test((str||'').trim()); }
+  function isLoginReady() { return Boolean(state.msal&&state.account&&!state.busy); }
+  function updateButtons() {
+    const can=isLoginReady();
+    el('pilot').disabled=!can;el('full').disabled=!can;el('connect').disabled=state.busy;
+    el('disconnect').disabled=!state.msal||!state.account||state.busy;
+    el('demo').disabled=state.busy;el('cancel').disabled=!state.busy;
+    el('exportFiles').disabled=state.busy||!state.files.length;
+    el('exportDups').disabled=state.busy||!state.groups.length;
+    el('clearResults').disabled=state.busy||!state.files.length;
+  }
+  function setProgress() {
+    el('fileCount').textContent=fmt(state.files.length);
+    el('folderCount').textContent=fmt(state.folders);
+    el('pageCount').textContent=fmt(state.pages);
+    el('groupCount').textContent=fmt(state.groups.length);
+    const track=el('progressBar');
+    track.style.width=state.busy?(Math.min(96,6+state.pages*2)+'%'):(state.complete?'100%':'0%');
+    track.parentElement.title='Progresso de páginas já lidas; o total definitivo pode ser desconhecido até o fim.';
+  }
+  function localConfig() { const clientId=el('clientId').value.trim();if(!assertGuid(clientId))throw new Error('Client ID inválido. Cole o Application (client) ID completo, em formato UUID.');return clientId; }
+  function makePca(clientId) {
+    if (!window.msal || !window.msal.PublicClientApplication) throw new Error('A biblioteca oficial de autenticação Microsoft não carregou. Verifique a rede e recarregue a página.');
+    return new window.msal.PublicClientApplication({
+      auth:{clientId,authority:'https://login.microsoftonline.com/consumers',redirectUri,navigateToLoginRequestUrl:false},
+      cache:{cacheLocation:'sessionStorage',storeAuthStateInCookie:false},
+      system:{loggerOptions:{loggerCallback:()=>{},piiLoggingEnabled:false}}
+    });
+  }
+  async function configureAuth() {
+    const clientId=localConfig();
+    if(state.msal && state.authClientId===clientId) return;
+    state.account=null;state.drive=null;
+    state.msal=makePca(clientId);
+    state.authClientId=clientId;
+    if (typeof state.msal.initialize==='function') await state.msal.initialize();
+    const response=await state.msal.handleRedirectPromise();
+    state.account=response?.account||state.msal.getAllAccounts()[0]||null;
+    if (state.account) state.msal.setActiveAccount(state.account);
+    localStorage.setItem(CLIENT_KEY,clientId);
+    msg('authStatus',state.account?'Conectado à Microsoft. Aguardando verificação do seu OneDrive.':'Client ID configurado. Toque em Conectar à Microsoft.',state.account?'ok':'');
+    updateButtons();
+  }
+  async function connect() {
+    if(state.busy) return;
+    try {
+      msg('authStatus','Inicializando autenticação Microsoft…');
+      await configureAuth();
+      if(!state.account) { await state.msal.loginRedirect({scopes:SCOPES,prompt:'select_account'});return; }
+      await verifyDrive();
+    } catch(err) { msg('authStatus','Autenticação não concluída: '+cleanError(err),'err'); }
+    updateButtons();
+  }
+  async function disconnect() {
+    if(state.busy||!state.msal)return;
+    try {
+      clearResults();
+      localStorage.removeItem(CLIENT_KEY);
+      el('clientId').value='';
+      const acc=state.account;
+      state.account=null;state.drive=null;
+      msg('authStatus','Desconectando…');
+      await state.msal.logoutRedirect({account:acc,postLogoutRedirectUri:redirectUri});
+    } catch (err) { msg('authStatus','Falha ao sair: '+cleanError(err),'err'); }
+  }
+  function cleanError(err) { const s=String(err?.errorMessage||err?.message||err||'Erro desconhecido');return s.replace(/(access_token|refresh_token|id_token)=([^&\s]+)/ig,'$1=[oculto]').slice(0,330); }
+  async function getToken() {
+    if(!state.msal||!state.account) throw new Error('É preciso entrar na conta Microsoft primeiro.');
+    try { return (await state.msal.acquireTokenSilent({scopes:SCOPES,account:state.account})).accessToken; }
+    catch(e) {
+      if(e instanceof window.msal.InteractionRequiredAuthError) throw new Error('A sessão Microsoft expirou. Conecte novamente antes de iniciar outra varredura.');
+      throw e;
+    }
+  }
+  const safeApiUrl=(raw)=>{let u=new URL(raw,API);if(u.protocol!=='https:'||u.host!=='graph.microsoft.com'||!u.pathname.startsWith('/v1.0/'))throw new Error('Página seguinte apontou para endereço não permitido. Varredura interrompida.');return u.toString();};
+  async function fetchGraph(url, token, signal) {
+    const safeUrl=safeApiUrl(url);
+    for(let attempt=0;attempt<6;attempt++){
+      if(state.cancel)throw new DOMException('Operação cancelada','AbortError');
+      let resp;
+      try {resp=await fetch(safeUrl,{method:'GET',cache:'no-store',headers:{'Authorization':'Bearer '+token,'Accept':'application/json'},signal});}
+      catch(e) {if(e?.name==='AbortError')throw e;if(attempt===5)throw e;await nap(Math.min(8000,600*2**attempt),signal);continue;}
+      if(resp.ok) { const data=await resp.json();if(!data||typeof data!=='object')throw new Error('Resposta Graph inválida.');return data; }
+      if([429,500,502,503,504].includes(resp.status)&&attempt<5){let sec=Number(resp.headers.get('Retry-After'));if(!Number.isFinite(sec)||sec<0||sec>120)sec=Math.min(20,2**attempt);await nap(sec*1000,signal);continue;}
+      let diagnostic='';try{const obj=await resp.json();diagnostic=obj?.error?.code||'';}catch(_e){}
+      throw new Error('Microsoft Graph HTTP '+resp.status+(diagnostic?' ('+diagnostic+')':'')+'. Verifique a permissão Files.Read e a pasta.');
+    }
+    throw new Error('Não foi possível concluir uma consulta ao Microsoft Graph.');
+  }
+  function nap(ms,signal){return new Promise((resolve,reject)=>{if(signal?.aborted)return reject(new DOMException('Cancelado','AbortError'));let timeout=setTimeout(done,ms);function onAbort(){clearTimeout(timeout);signal?.removeEventListener('abort',onAbort);reject(new DOMException('Cancelado','AbortError'));}function done(){signal?.removeEventListener('abort',onAbort);resolve();}signal?.addEventListener('abort',onAbort,{once:true});});}
+  async function verifyDrive() {
+    const token=await getToken();
+    const info=await fetchGraph(API+'/me/drive',token,new AbortController().signal);
+    if(!info.id||String(info.driveType||'').toLowerCase()!=='personal')throw new Error('A conta não parece ter um OneDrive pessoal. Confirme que entrou com a conta Microsoft correta.');
+    state.drive={id:info.id,driveType:info.driveType};
+    msg('authStatus','Conectado ao OneDrive pessoal. Autenticado somente para leitura. ID do drive validado; pronto para o piloto.', 'ok');
+    updateButtons();
+  }
+  function normalizeFolderPath(raw) {
+    const str=(raw||'').trim().replace(/^\/+|\/+$/g,'');
+    if(!str||str.includes('\\')) throw new Error('Informe um caminho de pasta, sem barra inicial.');
+    const parts=str.split('/').map(p=>p.trim());
+    if(parts.some(p=>!p||p==='.'||p==='..'||p.includes(':')||p.includes('?')||p.includes('#'))) throw new Error('Caminho de pasta inválido. Não use .., :, ?, # ou barras duplas.');
+    return {path:parts.join('/'),apiPath:parts.map(encodeURIComponent).join('/')};
+  }
+  function addFile(item, path, parentId) {
+    const hashes=item.file?.hashes||{};
+    const algorithm=hashes.sha256Hash?'SHA-256':hashes.sha1Hash?'SHA-1':hashes.quickXorHash?'QuickXor':'';
+    const hash=hashes.sha256Hash||hashes.sha1Hash||hashes.quickXorHash||'';
+    const ext=(item.name||'').includes('.')?item.name.split('.').pop().toLowerCase():'';
+    state.files.push({driveId:state.drive.id,itemId:item.id,parentId,folderPath:path,name:item.name||'',extension:ext,sizeBytes:Number(item.size)||0,lastModified:item.lastModifiedDateTime||'',hashAlgorithm:algorithm,hashValue:hash,candidateGroup:''});
+  }
+  function buildGroups() {
+    const g=new Map();
+    for(const f of state.files){if(!f.hashValue||!f.hashAlgorithm)continue;let key=[f.hashAlgorithm,String(f.sizeBytes),f.hashValue].join('|');if(!g.has(key))g.set(key,[]);g.get(key).push(f);}
+    const result=[];
+    for(const [key,files] of g){if(files.length<2)continue;const alg=files[0].hashAlgorithm,idx=result.length+1;
+      const group='DUP-'+String(idx).padStart(4,'0');files.forEach(f=>f.candidateGroup=group);
+      result.push({group,algorithm:alg,sizeBytes:files[0].sizeBytes,files,certainty:alg==='QuickXor'?'Hash não criptográfico — precisa confirmar':'Hash criptográfico — conferir origem e dependências'});
+    }
+    result.sort((a,b)=>b.sizeBytes*(b.files.length-1)-a.sizeBytes*(a.files.length-1));
+    state.groups=result;
+  }
+  function showResult() {
+    buildGroups();setProgress();updateButtons();
+    el('scopeStatus').textContent=(state.demo?'DEMONSTRAÇÃO — dados fictícios. ':state.complete?'Inventário concluído. ':'Amostra parcial. ')+
+      `${fmt(state.files.length)} arquivo(s), ${fmt(state.pages)} página(s), ${fmt(state.ignored)} item(ns) fora do escopo/atalho(s) ignorado(s). ${fmt(state.groups.length)} grupo(s) candidato(s). Nada foi enviado nem alterado.`;
+    const tbody=el('duplicateRows');tbody.replaceChildren();
+    if(!state.groups.length){let tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=4;td.textContent='Nenhum grupo candidato nesta amostra.';tr.appendChild(td);tbody.appendChild(tr);return;}
+    for(const group of state.groups.slice(0,50)){
+      const tr=document.createElement('tr');
+      for(const value of [group.algorithm,bytes(group.sizeBytes),String(group.files.length),group.files.slice(0,5).map(f=>f.folderPath+'/'+f.name).join(' | ')]){const td=document.createElement('td');td.textContent=value;tr.appendChild(td);}tbody.appendChild(tr);
+    }
+  }
+  async function scan(mode) {
+    if(state.busy) return;
+    state.cancel=false;state.controller=new AbortController();state.busy=true;
+    resetData();state.busy=true;state.startedAt=new Date().toISOString();updateButtons();
+    let limited=mode==='pilot',pageLimit=limited?2:Infinity;
+    try {
+      if(!state.account||!state.drive) throw new Error('Conecte e valide o OneDrive primeiro.');
+      const folder=normalizeFolderPath(el('folderPath').value);
+      let pageSize=Number(el('pageSize').value);
+      if(!Number.isInteger(pageSize)||pageSize<5||pageSize>200) throw new Error('Escolha entre 5 e 200 itens por página.');
+      const token=await getToken(),signal=state.controller.signal;
+      const item=await fetchGraph(API+'/me/drive/root:/'+folder.apiPath,token,signal);
+      if(!item.folder||!item.id||item.remoteItem) throw new Error('O endereço não corresponde a uma pasta própria do OneDrive.');
+      const expectedDrive=String(state.drive.id).toLowerCase();
+      if(item.parentReference?.driveId && item.parentReference.driveId.toLowerCase()!==expectedDrive) throw new Error('Pasta pertence a outro drive; acesso interrompido.');
+      const todo=[{id:item.id,path:folder.path}], seenFolders=new Set(), visitedLinks=new Set(), recursive=el('recurse').checked;
+      let interrupted=false;
+      while(todo.length && !state.cancel){
+        const task=todo.shift();if(seenFolders.has(task.id))continue;seenFolders.add(task.id);state.folders++;
+        let next=API+'/me/drive/items/'+encodeURIComponent(task.id)+'/children?$top='+pageSize+'&$select=id,name,size,file,folder,remoteItem,parentReference,lastModifiedDateTime';
+        while(next && !state.cancel){
+          const url=safeApiUrl(next);
+          if(visitedLinks.has(url))throw new Error('Ciclo detectado na paginação.');visitedLinks.add(url);
+          if(visitedLinks.size>100000)throw new Error('Limite de segurança de páginas excedido.');
+          const data=await fetchGraph(url,token,signal);
+          if(!Array.isArray(data.value))throw new Error('Resposta de listagem inesperada.');
+          for(const child of data.value){
+            const parent=child.parentReference||{};
+            const checkDrive=(parent.driveId||state.drive.id).toLowerCase()===expectedDrive;
+            if(!checkDrive||child.remoteItem||(parent.id&&parent.id!==task.id)){state.ignored++;continue;}
+            if(child.folder){if(recursive)todo.push({id:child.id,path:task.path+'/'+child.name});}
+            else if(child.file&&child.id) addFile(child,task.path,task.id);
+            else state.ignored++;
+          }
+          state.pages++;
+          next=data['@odata.nextLink']||null;
+          msg('scanStatus',`Lendo ${task.path}\n${fmt(state.pages)} página(s) · ${fmt(state.files.length)} arquivo(s) · ${fmt(todo.length)} subpasta(s) pendentes…`);
+          setProgress();
+          if(state.pages>=pageLimit){interrupted=true;break;}
+        }
+        if(interrupted)break;
+      }
+      state.complete=!limited&&!state.cancel&&!interrupted;
+      msg('scanStatus',state.cancel?'Interrompido. Os dados já lidos podem ser exportados como amostra parcial.':interrupted?'Piloto finalizado: duas páginas. Nenhum arquivo foi alterado.':`Inventário concluído: ${fmt(state.files.length)} arquivos em ${fmt(state.pages)} páginas.`,state.cancel?'':'ok');
+    } catch(err) {
+      state.complete=false;state.error=cleanError(err);
+      msg('scanStatus',state.cancel?'Leitura cancelada pelo usuário.':'Varredura interrompida: '+state.error,'err');
+    } finally {state.busy=false;state.controller=null;showResult();}
+  }
+  function resetData(){state.files=[];state.groups=[];state.pages=0;state.folders=0;state.ignored=0;state.complete=false;state.demo=false;state.error=null;setProgress();updateButtons();el('duplicateRows').replaceChildren();el('scopeStatus').textContent='Aguardando inventário.';}
+  function clearResults(){resetData();msg('scanStatus','Resultado removido da memória desta página.');}
+  function demo() {
+    if(state.busy)return;
+    resetData();state.demo=true;
+    const rows=[['foto-01.jpg',11400,'SHA-256','ABC123'],['foto-01-copia.jpg',11400,'SHA-256','ABC123'],['clip-01.mp4',800010,'SHA-1','DEF987'],['clip-01-2.mp4',800010,'SHA-1','DEF987'],['raw.nef',1000000,'SHA-256','RAW1'],['preview.jpg',350000,'SHA-256','JPG1'],['outro.jpg',23000,'QuickXor','XYZ'],['outro-2.jpg',23000,'QuickXor','XYZ']];
+    state.drive=state.drive||{id:'DEMONSTRACAO'};
+    for(const [name,sizeBytes,hashAlgorithm,hashValue] of rows) state.files.push({driveId:'DEMONSTRACAO',itemId:'SIM-'+name,parentId:'SIM-PASTA',folderPath:'EXEMPLO-FICTICIO',name,extension:name.split('.').pop(),sizeBytes,lastModified:'',hashAlgorithm,hashValue,candidateGroup:''});
+    state.pages=2;state.folders=1;state.complete=false;showResult();
+    msg('scanStatus','MODO DEMONSTRAÇÃO — sem conexão e sem acesso ao OneDrive. Os arquivos exibidos são inteiramente fictícios.','ok');
+  }
+  function csvCell(value){let str=String(value==null?'':value);if(/^[\s]*[=+@\-\t\r]/.test(str))str="'"+str;return '"'+str.replaceAll('"','""')+'"';}
+  function csv(rows){return '\uFEFF'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n')+'\r\n';}
+  function downloadCsv(name,rows){const blob=new Blob([csv(rows)],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),2000);}
+  function exportFiles(){if(!state.files.length||state.busy)return;let rows=[['drive_id','item_id','parent_id','folder_path','name','extension','size_bytes','last_modified','hash_algorithm','hash_value','candidate_group','is_partial','demo']];for(const f of state.files)rows.push([f.driveId,f.itemId,f.parentId,f.folderPath,f.name,f.extension,f.sizeBytes,f.lastModified,f.hashAlgorithm,f.hashValue,f.candidateGroup,state.complete?'no':'yes',state.demo?'yes':'no']);downloadCsv('onedrive-inventario-'+new Date().toISOString().slice(0,10)+'.csv',rows);}
+  function exportGroups(){if(!state.groups.length||state.busy)return;let rows=[['group','algorithm','size_bytes','copy_count','candidate_saved_bytes','file_path','item_id','notice','is_partial','demo']];for(const g of state.groups)for(const f of g.files)rows.push([g.group,g.algorithm,g.sizeBytes,g.files.length,g.sizeBytes*(g.files.length-1),f.folderPath+'/'+f.name,f.itemId,g.certainty,state.complete?'no':'yes',state.demo?'yes':'no']);downloadCsv('onedrive-duplicatas-candidatas-'+new Date().toISOString().slice(0,10)+'.csv',rows);}
+  function addHandlers(){
+    el('copyRedirect').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(redirectUri);msg('authStatus','URL de retorno copiada.');}catch(e){el('redirectUri').focus();el('redirectUri').select();msg('authStatus','Selecione e copie manualmente a URL acima.');}});
+    el('connect').addEventListener('click',connect);
+    el('disconnect').addEventListener('click',disconnect);
+    el('pilot').addEventListener('click',()=>scan('pilot'));
+    el('full').addEventListener('click',()=>scan('full'));
+    el('cancel').addEventListener('click',()=>{state.cancel=true;state.controller?.abort();msg('scanStatus','Cancelando a consulta atual…');});
+    el('demo').addEventListener('click',demo);
+    el('exportFiles').addEventListener('click',exportFiles);
+    el('exportDups').addEventListener('click',exportGroups);
+    el('clearResults').addEventListener('click',clearResults);
+  }
+  async function boot(){
+    addHandlers();setProgress();updateButtons();
+    if(!el('clientId').value.trim()){msg('authStatus','Configure primeiro o registro Microsoft e o Client ID. O modo demonstração já funciona.');return;}
+    try{await configureAuth();if(state.account)await verifyDrive();}
+    catch(err){msg('authStatus','Não foi possível restaurar a sessão: '+cleanError(err)+'\nUse Conectar à Microsoft para tentar novamente.','err');}
+    updateButtons();
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
